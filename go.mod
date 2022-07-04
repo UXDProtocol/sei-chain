@@ -137,3 +137,4 @@ replace (
 	github.com/zondax/hid => github.com/itsdevbear/hid v0.9.1-0.20220302052558-a59c1e68c29a
 	google.golang.org/grpc => google.golang.org/grpc v1.33.2
 )
+// https://github.com/cosmos/cosmos-sdk/pull/11307
