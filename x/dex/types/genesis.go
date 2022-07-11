@@ -12,7 +12,6 @@ func DefaultGenesis() *GenesisState {
 	return &GenesisState{
 		LongBookList:  []LongBook{},
 		ShortBookList: []ShortBook{},
-		// this line is used by starport scaffolding # genesis/types/default
 		Params:    DefaultParams(),
 		LastEpoch: 0,
 	}

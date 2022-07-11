@@ -437,10 +437,24 @@ func New(
 		panic(fmt.Sprintf("error while reading wasm config: %s", err))
 	}
 
+	app.EpochKeeper = *epochmodulekeeper.NewKeeper(
+		appCodec,
+		keys[epochmoduletypes.StoreKey],
+		keys[epochmoduletypes.MemStoreKey],
+		app.GetSubspace(epochmoduletypes.ModuleName),
+	)
+	app.DexKeeper = *dexmodulekeeper.NewKeeper(
+		appCodec,
+		keys[dexmoduletypes.StoreKey],
+		keys[dexmoduletypes.MemStoreKey],
+		app.GetSubspace(dexmoduletypes.ModuleName),
+		app.EpochKeeper,
+		app.BankKeeper,
+	)
 	// The last arguments can contain custom message handlers, and custom query handlers,
 	// if we want to allow any custom callbacks
 	supportedFeatures := "iterator,staking,stargate"
-	wasmOpts = append(wasmbinding.RegisterCustomPlugins(&app.OracleKeeper), wasmOpts...)
+	wasmOpts = append(wasmbinding.RegisterCustomPlugins(&app.OracleKeeper, &app.DexKeeper), wasmOpts...)
 	app.WasmKeeper = wasm.NewKeeper(
 		appCodec,
 		keys[wasm.StoreKey],
@@ -460,22 +474,7 @@ func New(
 		supportedFeatures,
 		wasmOpts...,
 	)
-
-	app.EpochKeeper = *epochmodulekeeper.NewKeeper(
-		appCodec,
-		keys[epochmoduletypes.StoreKey],
-		keys[epochmoduletypes.MemStoreKey],
-		app.GetSubspace(epochmoduletypes.ModuleName),
-	)
-	app.DexKeeper = *dexmodulekeeper.NewKeeper(
-		appCodec,
-		keys[dexmoduletypes.StoreKey],
-		keys[dexmoduletypes.MemStoreKey],
-		app.GetSubspace(dexmoduletypes.ModuleName),
-		app.EpochKeeper,
-		app.BankKeeper,
-		app.WasmKeeper,
-	)
+	app.DexKeeper.SetWasmKeeper(&app.WasmKeeper)
 	dexModule := dexmodule.NewAppModule(appCodec, app.DexKeeper, app.AccountKeeper, app.BankKeeper, app.WasmKeeper, app.tracingInfo)
 	epochModule := epochmodule.NewAppModule(appCodec, app.EpochKeeper, app.AccountKeeper, app.BankKeeper)
 
@@ -486,7 +485,7 @@ func New(
 		AddRoute(distrtypes.RouterKey, distr.NewCommunityPoolSpendProposalHandler(app.DistrKeeper)).
 		AddRoute(upgradetypes.RouterKey, upgrade.NewSoftwareUpgradeProposalHandler(app.UpgradeKeeper)).
 		AddRoute(ibcclienttypes.RouterKey, ibcclient.NewClientProposalHandler(app.IBCKeeper.ClientKeeper)).
-		AddRoute(dexmoduletypes.RouterKey, dexmodule.NewRegisterPairsProposalHandler(app.DexKeeper))
+		AddRoute(dexmoduletypes.RouterKey, dexmodule.NewProposalHandler(app.DexKeeper))
 	if len(enabledProposals) != 0 {
 		govRouter.AddRoute(wasm.RouterKey, wasm.NewWasmProposalHandler(app.WasmKeeper, enabledProposals))
 	}
@@ -688,6 +687,7 @@ func New(
 			TXCounterStoreKey: keys[wasm.StoreKey],
 			WasmConfig:        &wasmConfig,
 			OracleKeeper:      &app.OracleKeeper,
+			DexKeeper: &app.DexKeeper,
 		},
 	)
 	if err != nil {

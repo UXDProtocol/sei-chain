@@ -17,10 +17,6 @@ func (k msgServer) transferFunds(goCtx context.Context, msg *types.MsgPlaceOrder
 	defer span.End()
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
-	callerAddr, err := sdk.AccAddressFromBech32(msg.Creator)
-	if err != nil {
-		return err
-	}
 	contractAddr, err := sdk.AccAddressFromBech32(msg.ContractAddr)
 	if err != nil {
 		return err
@@ -31,20 +27,12 @@ func (k msgServer) transferFunds(goCtx context.Context, msg *types.MsgPlaceOrder
 	if k.BankKeeper.BlockedAddr(contractAddr) {
 		return sdkerrors.Wrapf(sdkerrors.ErrUnauthorized, "%s is not allowed to receive funds", contractAddr.String())
 	}
-	if err := k.BankKeeper.SendCoins(ctx, callerAddr, contractAddr, msg.Funds); err != nil {
-		return err
-	}
 
-	di := k.DepositInfo[msg.GetContractAddr()]
 	for _, fund := range msg.Funds {
-		fundDenom, unit, err := types.GetDenomFromStr(fund.Denom)
-		if err != nil {
-			panic(err)
-		}
-		di.DepositInfoList = append(di.DepositInfoList, dexcache.DepositInfoEntry{
+		k.MemState.GetDepositInfo(types.ContractAddress(msg.GetContractAddr())).AddDeposit(dexcache.DepositInfoEntry{
 			Creator: msg.Creator,
-			Denom:   fundDenom,
-			Amount:  types.ConvertDecToStandard(unit, sdk.NewDec(fund.Amount.Int64())),
+			Denom:   fund.Denom,
+			Amount:  sdk.NewDec(fund.Amount.Int64()),
 		})
 	}
 	return nil
@@ -60,27 +48,19 @@ func (k msgServer) PlaceOrders(goCtx context.Context, msg *types.MsgPlaceOrders)
 		return nil, err
 	}
 
-	pairToOrderPlacements := k.OrderPlacements[msg.GetContractAddr()]
-
 	nextId := k.GetNextOrderId(ctx)
 	idsInResp := []uint64{}
-	for _, orderPlacement := range msg.GetOrders() {
-		pair := types.Pair{PriceDenom: orderPlacement.PriceDenom, AssetDenom: orderPlacement.AssetDenom}
-		(*pairToOrderPlacements[pair.String()]).Orders = append(
-			(*pairToOrderPlacements[pair.String()]).Orders,
-			dexcache.OrderPlacement{
-				Id:         nextId,
-				Price:      orderPlacement.Price,
-				Quantity:   orderPlacement.Quantity,
-				Creator:    msg.Creator,
-				PriceDenom: orderPlacement.PriceDenom,
-				AssetDenom: orderPlacement.AssetDenom,
-				OrderType:  orderPlacement.OrderType,
-				Direction:  orderPlacement.PositionDirection,
-				Effect:     orderPlacement.PositionEffect,
-				Leverage:   orderPlacement.Leverage,
-			},
-		)
+	for _, order := range msg.GetOrders() {
+		ticksize, found := k.Keeper.GetTickSizeForPair(ctx, msg.GetContractAddr(), types.Pair{PriceDenom: order.PriceDenom, AssetDenom: order.AssetDenom})
+		if !found {
+			return nil, sdkerrors.Wrapf(sdkerrors.ErrKeyNotFound, "the pair {price:%s,asset:%s} has no ticksize configured", order.PriceDenom, order.AssetDenom)
+		}
+		pair := types.Pair{PriceDenom: order.PriceDenom, AssetDenom: order.AssetDenom, Ticksize: &ticksize}
+		pairStr := types.GetPairString(&pair)
+		order.Id = nextId
+		order.Account = msg.Creator
+		order.ContractAddr = msg.GetContractAddr()
+		k.MemState.GetBlockOrders(types.ContractAddress(msg.GetContractAddr()), pairStr).AddOrder(*order)
 		idsInResp = append(idsInResp, nextId)
 		nextId += 1
 	}
